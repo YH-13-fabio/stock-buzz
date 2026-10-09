@@ -71,7 +71,9 @@ class PriceFetcher:
         db.conn.executescript(SCHEMA)
 
     def login(self):
-        key, secret = os.environ.get("SHIOAJI_API_KEY"), os.environ.get("SHIOAJI_SECRET_KEY")
+        # 去掉貼上時不小心多帶的空白或換行
+        key = (os.environ.get("SHIOAJI_API_KEY") or "").strip()
+        secret = (os.environ.get("SHIOAJI_SECRET_KEY") or "").strip()
         if not key or not secret:
             print("[股價] 沒有設定 SHIOAJI_API_KEY / SHIOAJI_SECRET_KEY，略過股價")
             return False
