@@ -64,6 +64,7 @@ jobs:
           git diff --cached --quiet
           if ($LASTEXITCODE -ne 0) {
             git commit -q -m "daily update $(Get-Date -Format yyyy-MM-dd)"
+            git pull --rebase -q origin main
             git push
             exit $LASTEXITCODE
           } else {
