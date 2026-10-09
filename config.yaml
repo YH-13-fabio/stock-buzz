@@ -39,9 +39,10 @@ dcard:
 
 # ---------------- 多空判斷 ----------------
 sentiment:
-  # 有設定 ANTHROPIC_API_KEY 時，用 Claude 判斷多空（較準）；沒設定就用關鍵字規則（免費）
+  # 有設定 OPENAI_API_KEY（或 ANTHROPIC_API_KEY）時用 AI 判斷多空（較準）；都沒設定就用關鍵字規則（免費）
   use_llm_if_available: true
-  model: "claude-haiku-5-5"
+  openai_model: "gpt-5-mini"    # 想更省可改 "gpt-5-nano"（約便宜 5 倍，準確度略低）
+  model: "claude-haiku-5-5"     # 只有在用 Claude 時才會用到
   max_llm_calls_per_run: 400   # 安全上限，避免費用失控
 
 # 名稱容易跟日常用語撞到的股票：只有寫出「代號」時才算，寫名稱不算
