@@ -2,7 +2,7 @@
 
 兩種模式：
 1. 規則模式（免費）：看股票名稱前後 40 個字裡出現的多空關鍵字
-2. Claude 模式（較準）：有設定 ANTHROPIC_API_KEY 時，請 Claude 判斷，失敗會自動退回規則模式
+2. AI 模式（較準）：有設定 OPENAI_API_KEY（或 ANTHROPIC_API_KEY）時請 AI 判斷，失敗會自動退回規則模式
 """
 import json
 import os
@@ -70,25 +70,47 @@ def ptt_target_direction(title, text):
     return None
 
 
+OPENAI_URL = "https://api.openai.com/v1/chat/completions"
+
+
 class SentimentAnalyzer:
+    """多空判斷。優先順序：OpenAI（有 OPENAI_API_KEY）→ Claude（有 ANTHROPIC_API_KEY）→ 關鍵字規則。
+    AI 判斷失敗時，該篇會自動退回關鍵字規則，不會中斷。"""
+
     def __init__(self, cfg, stocks):
         self.stocks = stocks
-        self.model = cfg.get("model", "claude-haiku-5-5")
         self.budget = int(cfg.get("max_llm_calls_per_run", 400))
+        self.provider = None
         self.client = None
-        if cfg.get("use_llm_if_available", True) and os.environ.get("ANTHROPIC_API_KEY"):
+        self.fails = 0
+        use_llm = cfg.get("use_llm_if_available", True)
+        openai_key = (os.environ.get("OPENAI_API_KEY") or "").strip()
+        claude_key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+
+        if use_llm and openai_key:
+            import requests
+            self.provider = "openai"
+            self.model = cfg.get("openai_model", "gpt-5-mini")
+            self.client = requests.Session()
+            self.client.headers.update({"Authorization": f"Bearer {openai_key}",
+                                        "Content-Type": "application/json"})
+        elif use_llm and claude_key:
             try:
                 import anthropic
-                self.client = anthropic.Anthropic()
-                print(f"[多空判斷] 使用 Claude（{self.model}）")
+                self.client = anthropic.Anthropic(api_key=claude_key)
+                self.provider = "claude"
+                self.model = cfg.get("model", "claude-haiku-5-5")
             except Exception as e:  # noqa: BLE001
                 print(f"[多空判斷] 無法使用 Claude，改用關鍵字規則：{e}")
-        if self.client is None:
+
+        if self.provider:
+            print(f"[多空判斷] 使用 {self.provider}（{self.model}），每次最多 {self.budget} 篇")
+        else:
             print("[多空判斷] 使用關鍵字規則")
-        self.mode = "llm" if self.client else "rules"
+        self.mode = self.provider or "rules"
 
     def classify(self, title, text, hits):
-        """回傳 {代號: 1/0/-1}；Claude 判斷「其實不是在講這檔股票」時，該代號會被拿掉。"""
+        """回傳 {代號: 1/0/-1}；AI 判斷「其實不是在講這檔股票」時，該代號會被拿掉。"""
         full = f"{title}\n{text}"
         result = {code: rule_sentiment(full, spans) for code, spans in hits.items()}
         forced = ptt_target_direction(title, text)
@@ -97,34 +119,66 @@ class SentimentAnalyzer:
                 if any(a < len(title) for a, _ in spans):
                     result[code] = forced
 
-        if self.client and self.budget > 0:
+        # 連續失敗 5 次（例如金鑰錯誤、額度用完）就不再呼叫，避免整次執行卡住
+        if self.provider and self.budget > 0 and self.fails < 5:
             llm = self._llm(title, text, list(hits))
             if llm is not None:
                 result = llm
+                if forced is not None:  # 作者自己標的多空最準，保留
+                    for code, spans in hits.items():
+                        if code in result and any(a < len(title) for a, _ in spans):
+                            result[code] = forced
         return result
 
-    def _llm(self, title, text, codes):
-        self.budget -= 1
+    def _prompt(self, title, text, codes):
         names = "、".join(f"{c} {self.stocks.get(c, {}).get('name', '')}" for c in codes)
-        body = text[:2500]
-        prompt = (
-            "以下是一則台灣股市社群的貼文或影片字幕。請判斷作者對每一檔候選股票的態度。\n"
+        return (
+            "以下是一則台灣股市社群的貼文或投資頻道影片的說明。請判斷作者對每一檔候選股票的態度。\n"
             f"候選股票：{names}\n\n"
             "規則：\n"
             "- bull = 看多／想買／認為會漲；bear = 看空／想賣／認為會跌；neutral = 只是提到、新聞陳述或看不出立場\n"
-            "- 如果文中的字其實不是指這檔股票（例如是一般詞彙、年份、價格），標 not_stock\n"
-            "- 只輸出 JSON，例如 {\"2330\": \"bull\", \"2317\": \"neutral\"}\n\n"
-            f"標題：{title}\n內容：\n{body}"
+            "- 鄉民反串、嘲諷要依實際意思判斷（例如「GG 要倒了快逃」若明顯是反串就不是看空）\n"
+            "- 如果文中的字其實不是指這檔股票（例如是一般詞彙、年份、價格、其他公司），標 not_stock\n"
+            "- 只輸出 JSON 物件，key 是股票代號，例如 {\"2330\": \"bull\", \"2317\": \"neutral\"}\n\n"
+            f"標題：{title}\n內容：\n{text[:2500]}"
         )
+
+    def _call_openai(self, prompt):
+        body = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "response_format": {"type": "json_object"},
+            "max_completion_tokens": 2000,
+        }
+        if self.model.startswith(("gpt-5", "o")):
+            body["reasoning_effort"] = "low"
+        r = self.client.post(OPENAI_URL, json=body, timeout=90)
+        if r.status_code == 400 and "reasoning_effort" in body:
+            body.pop("reasoning_effort")  # 不支援這個參數的模型
+            r = self.client.post(OPENAI_URL, json=body, timeout=90)
+        if r.status_code >= 400:
+            raise RuntimeError(f"HTTP {r.status_code}：{r.text[:200]}")
+        return r.json()["choices"][0]["message"]["content"] or ""
+
+    def _call_claude(self, prompt):
+        resp = self.client.messages.create(
+            model=self.model, max_tokens=300,
+            messages=[{"role": "user", "content": prompt}])
+        return "".join(getattr(b, "text", "") for b in resp.content)
+
+    def _llm(self, title, text, codes):
+        self.budget -= 1
+        prompt = self._prompt(title, text, codes)
         try:
-            resp = self.client.messages.create(
-                model=self.model, max_tokens=300,
-                messages=[{"role": "user", "content": prompt}])
-            raw = "".join(getattr(b, "text", "") for b in resp.content)
+            raw = self._call_openai(prompt) if self.provider == "openai" else self._call_claude(prompt)
             data = json.loads(re.search(r"\{.*\}", raw, re.S).group(0))
             mapping = {"bull": 1, "bear": -1, "neutral": 0}
+            self.fails = 0
             return {c: mapping[str(data.get(c, "neutral")).lower()]
                     for c in codes if str(data.get(c, "neutral")).lower() in mapping}
         except Exception as e:  # noqa: BLE001
-            print(f"[多空判斷] Claude 判斷失敗，此篇改用規則：{e}")
+            self.fails += 1
+            print(f"[多空判斷] {self.provider} 判斷失敗，此篇改用規則：{e}")
+            if self.fails == 5:
+                print("[多空判斷] 連續失敗 5 次，本次其餘內容都改用關鍵字規則")
             return None
