@@ -1,0 +1,55 @@
+# ============================================================
+#  股市討論熱度 Dashboard 設定檔
+#  在 GitHub 網頁上點這個檔案 → 右上角鉛筆圖示，就能直接修改
+# ============================================================
+
+# 每次執行往回抓多少小時內的文章（每天跑一次，設 30 小時保留一點重疊，重複的會自動去除）
+lookback_hours: 30
+
+# 一篇文章提到超過這麼多檔股票，通常是盤後整理、籌碼清單，就略過不計，避免灌水
+max_stocks_per_post: 8
+
+# ---------------- PTT ----------------
+ptt:
+  enabled: true
+  boards: ["Stock"]        # 想加其他板，例如 ["Stock", "DayTrade"]
+  max_pages: 20            # 最多往前翻幾頁（一頁約 20 篇）
+  include_comments: true   # 推文裡提到股票也要算（在 Dashboard 會以「PTT推文」分開顯示）
+
+# ---------------- YouTube ----------------
+# 需要在 GitHub Secrets 設定 YOUTUBE_API_KEY（教學見 README）
+youtube:
+  enabled: true
+  # 把想追蹤的頻道放在這裡，三種寫法都可以：
+  #   - "@頻道帳號"                         例如 "@yutinghao"
+  #   - "UC 開頭的頻道 ID"
+  #   - 頻道網址 "https://www.youtube.com/@xxxx"
+  channels:
+    - "@yutinghao"
+  max_videos_per_channel: 5
+
+# ---------------- Dcard（實驗性）----------------
+# Dcard 常擋掉程式存取，開啟後若失敗只會跳過，不會影響其他來源
+dcard:
+  enabled: false
+  forums: ["stock"]
+  limit: 60
+
+# ---------------- 多空判斷 ----------------
+sentiment:
+  # 有設定 ANTHROPIC_API_KEY 時，用 Claude 判斷多空（較準）；沒設定就用關鍵字規則（免費）
+  use_llm_if_available: true
+  model: "claude-haiku-5-5"
+  max_llm_calls_per_run: 400   # 安全上限，避免費用失控
+
+# 名稱容易跟日常用語撞到的股票：只有寫出「代號」時才算，寫名稱不算
+ambiguous_names: ["統一", "大同", "中華", "全家", "大成", "國產", "台灣大", "東元", "天然", "新光", "中保", "精華", "光明", "興富發", "第一店", "美食"]
+
+# ---------------- 股價與技術指標（永豐金 Shioaji）----------------
+# 需要在 GitHub Secrets 設定 SHIOAJI_API_KEY 與 SHIOAJI_SECRET_KEY（教學見 README）
+# 沒設定就只會顯示討論熱度，不影響其他功能
+prices:
+  enabled: true
+  max_stocks: 80              # 只抓最近 7 天最常被提到的前 80 檔
+  history_days: 150           # 新股票第一次補多少天的歷史（算 60 日均線需要約 90 天以上）
+  max_backfill_per_run: 25    # 每次最多替幾檔新股票補歷史（避免超過每日 500MB 流量上限）
