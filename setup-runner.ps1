@@ -39,8 +39,11 @@ if (Test-Path "$RunnerDir\config.cmd") {
   $asset = $rel.assets | Where-Object { $_.name -like "actions-runner-$arch-*.zip" } | Select-Object -First 1
   Write-Host "下載 $($asset.name) ..."
   $zip = Join-Path $env:TEMP $asset.name
-  Invoke-WebRequest -UseBasicParsing $asset.browser_download_url -OutFile $zip
-  Expand-Archive -Path $zip -DestinationPath $RunnerDir -Force
+  & curl.exe -L --fail --retry 3 -o $zip $asset.browser_download_url
+  if ($LASTEXITCODE -ne 0) { throw "下載失敗（curl 代碼 $LASTEXITCODE）" }
+  Write-Host '解壓縮中...'
+  & tar.exe -xf $zip -C $RunnerDir
+  if ($LASTEXITCODE -ne 0) { throw "解壓縮失敗（tar 代碼 $LASTEXITCODE）" }
   Remove-Item $zip
 }
 Step '3/4 連結到你的 GitHub repo'
