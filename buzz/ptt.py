@@ -13,9 +13,23 @@ BASE = "https://www.ptt.cc"
 
 def _session():
     s = requests.Session()
-    s.headers["User-Agent"] = UA
+    s.headers.update({
+        "User-Agent": UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
+        "Referer": "https://www.ptt.cc/bbs/index.html",
+    })
     s.cookies.set("over18", "1", domain=".ptt.cc")
     return s
+
+
+def _describe_error(e):
+    """出錯時多印一點伺服器資訊，方便判斷是被擋 IP 還是其他問題。"""
+    resp = getattr(e, "response", None)
+    if resp is None:
+        return str(e)
+    return (f"HTTP {resp.status_code}（server={resp.headers.get('server', '?')}，"
+            f"內容開頭：{resp.text[:120].strip()!r}）")
 
 
 def parse_index(html):
@@ -103,7 +117,7 @@ def fetch(boards, lookback_hours=30, max_pages=20, delay=0.4):
                 r = s.get(url, timeout=20)
                 r.raise_for_status()
             except Exception as e:  # noqa: BLE001
-                print(f"[PTT] 讀取列表失敗 {url}：{e}")
+                print(f"[PTT] 讀取列表失敗 {url}：{_describe_error(e)}")
                 break
             posts, prev = parse_index(r.text)
             if posts and all(_index_date_older_than(p["date"], cutoff) for p in posts):
