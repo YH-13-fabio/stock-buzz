@@ -9,7 +9,9 @@ Shioaji 限制（官方文件）：
 - 沒有透過 API 下單的帳號，每日行情流量上限 500MB（每個交易日早上 8 點重置）
 - 行情查詢每 10 秒最多 50 次；請在收盤後查歷史資料
 """
+import contextlib
 import os
+import sys
 import time
 from collections import OrderedDict
 from datetime import date, datetime, timedelta, timezone
@@ -63,19 +65,45 @@ def to_daily(rows):
     return days
 
 
+@contextlib.contextmanager
+def _silence_output():
+    """Shioaji 底層會把連線資訊（含身分證字號、IP）直接印到畫面上，
+    公開 repo 的執行紀錄任何人都看得到，所以在使用 Shioaji 期間把所有輸出丟掉。"""
+    sys.stdout.flush()
+    sys.stderr.flush()
+    saved = (os.dup(1), os.dup(2))
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(devnull, 1)
+    os.dup2(devnull, 2)
+    try:
+        yield
+    finally:
+        time.sleep(2)  # 等背景執行緒把登出訊息印完（一樣丟掉）
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os.dup2(saved[0], 1)
+        os.dup2(saved[1], 2)
+        for fd in (*saved, devnull):
+            os.close(fd)
+
+
 class PriceFetcher:
     def __init__(self, db, cfg):
         self.db = db
         self.cfg = cfg
         self.api = None
+        self.messages = []
         db.conn.executescript(SCHEMA)
+
+    def _log(self, msg):
+        self.messages.append(msg)
 
     def login(self):
         # 去掉貼上時不小心多帶的空白或換行
         key = (os.environ.get("SHIOAJI_API_KEY") or "").strip()
         secret = (os.environ.get("SHIOAJI_SECRET_KEY") or "").strip()
         if not key or not secret:
-            print("[股價] 沒有設定 SHIOAJI_API_KEY / SHIOAJI_SECRET_KEY，略過股價")
+            self._log("[股價] 沒有設定 SHIOAJI_API_KEY / SHIOAJI_SECRET_KEY，略過股價")
             return False
         try:
             import shioaji as sj
@@ -84,10 +112,10 @@ class PriceFetcher:
                 self.api.login(api_key=key, secret_key=secret, subscribe_trade=False)
             except TypeError:  # 舊版沒有 subscribe_trade 參數
                 self.api.login(api_key=key, secret_key=secret)
-            print(f"[股價] 永豐 Shioaji 登入成功（版本 {getattr(sj, '__version__', '?')}）")
+            self._log(f"[股價] 永豐 Shioaji 登入成功（版本 {getattr(sj, '__version__', '?')}）")
             return True
         except Exception as e:  # noqa: BLE001
-            print(f"[股價] Shioaji 登入失敗，略過股價：{e}")
+            self._log(f"[股價] Shioaji 登入失敗，略過股價：{e}")
             self.api = None
             return False
 
@@ -131,14 +159,26 @@ class PriceFetcher:
                 k = self.api.kbars(contract=contract, start=cur.isoformat(), end=stop.isoformat())
                 rows += _kbars_rows(k)
             except Exception as e:  # noqa: BLE001
-                print(f"[股價] {contract.code} {cur}~{stop} 查詢失敗：{e}")
+                self._log(f"[股價] {contract.code} {cur}~{stop} 查詢失敗：{e}")
             time.sleep(0.3)  # 每 10 秒 50 次的限制內
             cur = stop + timedelta(days=1)
         return rows
 
     def update(self, codes):
-        """更新這些股票的日線。已有歷史的只補最近幾天；新股票補 history_days 天。"""
-        if not codes or not self.login():
+        """更新這些股票的日線。執行期間隱藏 Shioaji 的輸出，結束後才印出我們自己的訊息。"""
+        if not codes:
+            return 0
+        self.messages = []
+        try:
+            with _silence_output():
+                return self._update(codes)
+        finally:
+            for m in self.messages:
+                print(m)
+
+    def _update(self, codes):
+        """已有歷史的只補最近幾天；新股票補 history_days 天。"""
+        if not self.login():
             return 0
         history_days = int(self.cfg.get("history_days", 150))
         backfill_limit = int(self.cfg.get("max_backfill_per_run", 25))
@@ -159,7 +199,7 @@ class PriceFetcher:
                         continue
                     rem = self._remaining_mb()
                     if rem is not None and rem < MIN_REMAINING_MB:
-                        print(f"[股價] 今日流量剩 {rem:.0f}MB，暫停補歷史資料，明天會繼續")
+                        self._log(f"[股價] 今日流量剩 {rem:.0f}MB，暫停補歷史資料，明天會繼續")
                         backfill_limit = 0
                         continue
                     start = today - timedelta(days=history_days)
@@ -173,9 +213,9 @@ class PriceFetcher:
         finally:
             rem = self._remaining_mb()
             if rem is not None:
-                print(f"[股價] 今日行情流量剩餘約 {rem:.0f}MB")
+                self._log(f"[股價] 今日行情流量剩餘約 {rem:.0f}MB")
             self.logout()
-        print(f"[股價] 更新 {updated} 檔（其中新補歷史 {backfilled} 檔）")
+        self._log(f"[股價] 更新 {updated} 檔（其中新補歷史 {backfilled} 檔）")
         return updated
 
 
