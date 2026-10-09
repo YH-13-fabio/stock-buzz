@@ -25,7 +25,9 @@ youtube:
   #   - "UC 開頭的頻道 ID"
   #   - 頻道網址 "https://www.youtube.com/@xxxx"
   channels:
-    - "@yutinghao"
+    - "@HAMILIU"
+    - "@gp52000"
+    - "@free16888"
   max_videos_per_channel: 5
 
 # ---------------- Dcard（實驗性）----------------
