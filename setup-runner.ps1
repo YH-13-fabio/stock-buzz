@@ -39,8 +39,15 @@ if (Test-Path "$RunnerDir\config.cmd") {
   $asset = $rel.assets | Where-Object { $_.name -like "actions-runner-$arch-*.zip" } | Select-Object -First 1
   Write-Host "下載 $($asset.name) ..."
   $zip = Join-Path $env:TEMP $asset.name
-  & curl.exe -L --fail --retry 3 -o $zip $asset.browser_download_url
-  if ($LASTEXITCODE -ne 0) { throw "下載失敗（curl 代碼 $LASTEXITCODE）" }
+  # 網路慢或中斷時會從斷點續傳，最多重試 30 次
+  for ($i = 1; $i -le 30; $i++) {
+    $have = if (Test-Path $zip) { (Get-Item $zip).Length } else { 0 }
+    if ($have -ge $asset.size) { break }
+    if ($i -gt 1) { Write-Host "連線中斷，從 $([math]::Round($have/1MB,1)) MB 處續傳（第 $i 次）..." -ForegroundColor Yellow }
+    & curl.exe -L -C - --connect-timeout 30 --speed-limit 1024 --speed-time 60 -o $zip $asset.browser_download_url
+    Start-Sleep -Seconds 2
+  }
+  if (-not (Test-Path $zip) -or (Get-Item $zip).Length -ne $asset.size) { throw '下載沒有完成，請再執行一次（會從斷點繼續）' }
   Write-Host '解壓縮中...'
   & tar.exe -xf $zip -C $RunnerDir
   if ($LASTEXITCODE -ne 0) { throw "解壓縮失敗（tar 代碼 $LASTEXITCODE）" }
