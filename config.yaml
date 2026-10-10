@@ -50,11 +50,13 @@ ambiguous_names: ["統一", "大同", "中華", "全家", "大成", "國產", "�
                   "世界", "綠電", "數字", "大量", "時報", "巨大", "地球", "無敵", "安心", "全新", "聯合", "正文", "中工", "新產",
                   "全台", "海灣", "合一", "力士", "三星", "高技", "互動", "神數", "霹靂", "大台北", "全友", "大將", "大眾", "東南", "和平"]
 
-# ---------------- 股價與技術指標（永豐金 Shioaji）----------------
-# 需要在 GitHub Secrets 設定 SHIOAJI_API_KEY 與 SHIOAJI_SECRET_KEY（教學見 README）
-# 沒設定就只會顯示討論熱度，不影響其他功能
+# ---------------- 股價、K 線與技術指標 ----------------
+# 優先用 FinMind（GitHub Secrets 設定 FINMIND_TOKEN）：官方日 K、融資餘額、融資維持率
+# 沒有 FinMind 時改用永豐金 Shioaji（SHIOAJI_API_KEY / SHIOAJI_SECRET_KEY）
+# 兩個都沒設定就只會顯示討論熱度，不影響其他功能
 prices:
   enabled: true
   max_stocks: 80              # 只抓最近 7 天最常被提到的前 80 檔
+  history_years: 5            # FinMind 第一次補幾年日 K（月 K 需要長一點的歷史）
   history_days: 150           # 新股票第一次補多少天的歷史（算 60 日均線需要約 90 天以上）
   max_backfill_per_run: 25    # 每次最多替幾檔新股票補歷史（避免超過每日 500MB 流量上限）
