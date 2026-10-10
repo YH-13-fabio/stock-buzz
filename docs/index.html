@@ -397,8 +397,9 @@ function renderDetail(rows) {
 const KCACHE = {};
 let KCHARTS = [];
 let KTOKEN = 0;
+let KRO = null;
 
-function disposeK() { KCHARTS.forEach(c => { try { c.remove(); } catch (e) {} }); KCHARTS = []; }
+function disposeK() { if (KRO) { KRO.disconnect(); KRO = null; } KCHARTS.forEach(c => { try { c.remove(); } catch (e) {} }); KCHARTS = []; }
 
 async function loadK(code) {
   const box = $("#kchart"); if (!box) return;
@@ -470,9 +471,9 @@ function drawK(box, raw) {
   if (hasMM) panes.push({ id: "mm", h: 90, title: `融資維持率${raw.mm_src === "official" ? "" : "（估算）"}` });
   box.innerHTML = panes.map(p => `<div class="kpane" style="height:${p.h}px"><div class="kleg" id="leg-${p.id}"></div><div class="kc" id="kc-${p.id}" style="height:100%"></div></div>`).join("");
 
-  const base = (last) => ({
+  const base = (last, logo) => ({
     autoSize: true,
-    layout: { background: { type: "solid", color: C.bg }, textColor: C.text, fontSize: 11 },
+    layout: { background: { type: "solid", color: C.bg }, textColor: C.text, fontSize: 11, attributionLogo: logo },
     grid: { vertLines: { color: C.grid }, horzLines: { color: C.grid } },
     rightPriceScale: { borderColor: C.grid, minimumWidth: 64, scaleMargins: { top: 0.18, bottom: 0.08 } },
     timeScale: { borderColor: C.grid, visible: last, rightOffset: 3, tickMarkFormatter: undefined },
@@ -486,7 +487,7 @@ function drawK(box, raw) {
 
   const S = {};
   const charts = panes.map((p, idx) => {
-    const ch = LC.createChart($(`#kc-${p.id}`), base(idx === panes.length - 1));
+    const ch = LC.createChart($(`#kc-${p.id}`), base(idx === panes.length - 1, idx === 0));
     if (p.id === "main") {
       S.candle = ch.addCandlestickSeries({ upColor: C.up, downColor: C.down, borderUpColor: C.up, borderDownColor: C.down, wickUpColor: C.up, wickDownColor: C.down, priceLineVisible: false });
       S.candle.setData(k.t.map((t, i) => ({ time: t, open: k.o[i], high: k.h[i], low: k.l[i], close: k.c[i] })));
@@ -525,7 +526,12 @@ function drawK(box, raw) {
     syncing = false;
   }));
   const show = tf === "D" ? 120 : tf === "W" ? 104 : 60;
-  charts[0].timeScale().setVisibleLogicalRange({ from: Math.max(0, n - show), to: n + 2 });
+  const setRange = () => charts[0].timeScale().setVisibleLogicalRange({ from: Math.max(0, n - show), to: n + 2 });
+  setRange(); requestAnimationFrame(setRange);
+  // 圖表建立時若還看不到（寬度 0），等它第一次有寬度再設定顯示範圍
+  let ranged = box.clientWidth > 0;
+  KRO = new ResizeObserver(() => { if (!ranged && box.clientWidth > 0) { ranged = true; setTimeout(setRange, 50); } });
+  KRO.observe(box);
 
   // 圖例（顯示游標所在那根 K 的數值）
   const idxOf = {}; k.t.forEach((t, i) => idxOf[t] = i);
