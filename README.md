@@ -98,6 +98,16 @@
 > - 每次登入用完會立刻登出，不會佔用你的連線數
 > - Secrets 是加密儲存的，repo 設成 Public 別人也看不到金鑰
 
+### 步驟 6-3：（選用，建議）加上 FinMind：K 線、MACD、乖離率、融資維持率
+
+1. 到 <https://finmindtrade.com/> 註冊並登入，在會員頁面複製 **API Token**
+2. 到 **Secrets and variables → Actions** 新增 Secret：Name 填 `FINMIND_TOKEN`，貼上 token
+3. 下次執行就會抓被討論股票的 **5 年日 K** 與融資餘額，網站右側會出現可切換日／週／月的 K 線圖，下方有 MACD、10MA 乖離率、融資維持率
+
+> - 設定 FinMind 之後，股價會改用 FinMind 的官方日 K（永豐 API 只在沒有 FinMind 時才使用）
+> - **個股融資維持率**是 FinMind 的 sponsor 付費資料；免費會員會自動改用「估算值」（用融資餘額變化推算平均成本，假設融資 6 成），圖上會標示「估算」，只適合看趨勢
+> - 第一次執行會替每檔股票抓 5 年資料，大約 160～240 次 API 呼叫，免費會員額度內
+
 ### 步驟 7：開啟網站（GitHub Pages）
 
 1. **Settings** → 左側 **Pages**
@@ -200,7 +210,8 @@ stock-buzz/
 │   ├── dcard.py            Dcard（實驗性）
 │   ├── stocks.py           上市櫃股票清單＋辨識文章提到哪些股票
 │   ├── sentiment.py        多空判斷（關鍵字規則／Claude）
-│   ├── prices.py           永豐 Shioaji 股價（1 分 K 合成日 K）
+│   ├── finmind.py          FinMind 日 K、融資餘額、融資維持率
+│   ├── prices.py           永豐 Shioaji 股價（1 分 K 合成日 K，沒有 FinMind 時使用）
 │   ├── indicators.py       均線、RSI、KD、MACD
 │   ├── db.py               SQLite 資料庫
 │   └── site.py             產生 docs/data.json
@@ -210,7 +221,8 @@ stock-buzz/
 │   └── buzz.db             歷史資料（自動產生）
 ├── docs/
 │   ├── index.html          Dashboard 網頁
-│   └── data.json           網頁讀取的資料（自動產生）
+│   ├── data.json           網頁讀取的資料（自動產生）
+│   └── k/                  每檔股票的 K 線資料（自動產生，點選股票時才載入）
 └── .github/workflows/
     └── daily.yml           每日排程設定
 ```
