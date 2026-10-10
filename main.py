@@ -36,7 +36,7 @@ def main():
         items += ptt.fetch(p.get("boards", ["Stock"]), hours, p.get("max_pages", 20))
     y = cfg.get("youtube", {})
     if y.get("enabled"):
-        items += youtube.fetch(y.get("channels", []), hours, y.get("max_videos_per_channel", 5))
+        items += youtube.fetch(y.get("channels", []), y.get("lookback_hours", hours), y.get("max_videos_per_channel", 5))
     d = cfg.get("dcard", {})
     if d.get("enabled"):
         items += dcard.fetch(d.get("forums", ["stock"]), hours, d.get("limit", 60))
