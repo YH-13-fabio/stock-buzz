@@ -46,13 +46,21 @@ def _seconds(iso):
     return d * 86400 + h * 3600 + mi * 60 + se
 
 
-def _durations(ids, key):
-    if not ids:
-        return {}
-    data = _get("videos", key, part="contentDetails,snippet", id=",".join(ids))
-    return {v["id"]: (_seconds(v["contentDetails"].get("duration")),
-                      v["snippet"].get("liveBroadcastContent", "none"))
-            for v in data.get("items", [])}
+def _details(ids, key):
+    """影片長度、直播狀態，以及直播的實際開始／結束時間。"""
+    out = {}
+    for i in range(0, len(ids), 50):
+        data = _get("videos", key, part="contentDetails,snippet,liveStreamingDetails", id=",".join(ids[i:i + 50]))
+        for v in data.get("items", []):
+            ls = v.get("liveStreamingDetails") or {}
+            out[v["id"]] = (_seconds(v["contentDetails"].get("duration")),
+                            v["snippet"].get("liveBroadcastContent", "none"),
+                            ls.get("actualEndTime") or ls.get("actualStartTime"))
+    return out
+
+
+def _ts(s):
+    return datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
 def _transcript(video_id):
@@ -90,23 +98,27 @@ def fetch(channels, lookback_hours=30, max_videos=5, short_max=180):
         except Exception as e:  # noqa: BLE001
             print(f"[YouTube] 讀取頻道 {ch} 失敗：{e}")
             continue
-        recent = []
-        for v in data.get("items", []):
-            published = datetime.fromisoformat(
-                v["contentDetails"].get("videoPublishedAt", v["snippet"]["publishedAt"]).replace("Z", "+00:00"))
-            if published >= cutoff:
-                recent.append((v, published))
+        vids = data.get("items", [])
         try:
-            info = _durations([v["contentDetails"]["videoId"] for v, _ in recent], key)
+            info = _details([v["contentDetails"]["videoId"] for v in vids], key)
         except Exception as e:  # noqa: BLE001
-            print(f"[YouTube] 讀取影片長度失敗：{e}")
+            print(f"[YouTube] 讀取影片資訊失敗：{e}")
             info = {}
+        recent = []
+        for v in vids:
+            vid = v["contentDetails"]["videoId"]
+            published = _ts(v["contentDetails"].get("videoPublishedAt", v["snippet"]["publishedAt"]))
+            ended = (info.get(vid) or (None, None, None))[2]
+            # 直播存檔：用直播實際結束時間判斷新舊（發布時間常是好幾天前建立預告的時間）
+            when = max(published, _ts(ended)) if ended else published
+            if when >= cutoff:
+                recent.append((v, when))  # 直播存檔記在直播當天
         n = skipped = 0
         for v, published in recent:
             sn = v["snippet"]
             vid = v["contentDetails"]["videoId"]
-            secs, live = info.get(vid, (None, "none"))
-            # 不抓 Shorts（3 分鐘以內）和還沒開始／正在直播的影片
+            secs, live, _ = info.get(vid, (None, "none", None))
+            # 不抓 Shorts（3 分鐘以內）和還沒開始／正在進行的直播；直播結束後的存檔會照常抓
             if live in ("upcoming", "live") or (secs is not None and secs <= short_max) \
                     or "#shorts" in (sn["title"] + sn.get("description", "")).lower():
                 skipped += 1
@@ -118,6 +130,6 @@ def fetch(channels, lookback_hours=30, max_videos=5, short_max=180):
                               url=f"https://www.youtube.com/watch?v={vid}", title=sn["title"],
                               author=ch_title, published=published, text=text))
             n += 1
-        extra = f"（略過 {skipped} 部短影音／直播）" if skipped else ""
+        extra = f"（略過 {skipped} 部短影音／進行中的直播）" if skipped else ""
         print(f"[YouTube] {ch_title}：取得 {n} 部新影片{extra}")
     return items
