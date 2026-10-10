@@ -29,6 +29,7 @@ youtube:
     - "@gp52000"
     - "@free16888"
   max_videos_per_channel: 5
+  lookback_hours: 48          # 抓最近幾小時內發布的影片（PTT 仍用最上面的 lookback_hours）
 
 # ---------------- Dcard（實驗性）----------------
 # Dcard 常擋掉程式存取，開啟後若失敗只會跳過，不會影響其他來源
