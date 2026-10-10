@@ -37,8 +37,27 @@ def _uploads_playlist(channel, key):
     return it["contentDetails"]["relatedPlaylists"]["uploads"], it["snippet"]["title"]
 
 
+def _seconds(iso):
+    """ISO 8601 影片長度（例如 PT12M3S）→ 秒數。"""
+    m = re.fullmatch(r"P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", iso or "")
+    if not m:
+        return None
+    d, h, mi, se = (int(x or 0) for x in m.groups())
+    return d * 86400 + h * 3600 + mi * 60 + se
+
+
+def _durations(ids, key):
+    if not ids:
+        return {}
+    data = _get("videos", key, part="contentDetails,snippet", id=",".join(ids))
+    return {v["id"]: (_seconds(v["contentDetails"].get("duration")),
+                      v["snippet"].get("liveBroadcastContent", "none"))
+            for v in data.get("items", [])}
+
+
 def _transcript(video_id):
-    langs = ["zh-TW", "zh-Hant", "zh", "zh-Hans", "en"]
+    # 只抓中文字幕。部分中文影片只有「英文自動字幕」，那是 YouTube 把中文誤認成英文，內容是亂碼，不採用
+    langs = ["zh-TW", "zh-Hant", "zh", "zh-HK", "zh-Hans", "zh-CN"]
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
         if hasattr(YouTubeTranscriptApi, "get_transcript"):  # 舊版
@@ -47,11 +66,13 @@ def _transcript(video_id):
         fetched = YouTubeTranscriptApi().fetch(video_id, languages=langs)  # 新版
         return "".join(s.text for s in fetched)
     except Exception as e:  # noqa: BLE001
-        print(f"[YouTube] {video_id} 無法取得字幕（改用標題與說明）：{type(e).__name__}")
+        why = {"TranscriptsDisabled": "影片沒有字幕軌，常見於字幕直接燒在畫面上的短影音",
+               "NoTranscriptFound": "沒有中文字幕"}.get(type(e).__name__, type(e).__name__)
+        print(f"[YouTube] {video_id} 無法取得字幕，改用標題與說明（{why}）")
         return ""
 
 
-def fetch(channels, lookback_hours=30, max_videos=5):
+def fetch(channels, lookback_hours=30, max_videos=5, short_max=180):
     key = os.environ.get("YOUTUBE_API_KEY")
     if not key:
         print("[YouTube] 沒有設定 YOUTUBE_API_KEY，略過 YouTube")
@@ -65,22 +86,38 @@ def fetch(channels, lookback_hours=30, max_videos=5):
                 print(f"[YouTube] 找不到頻道：{ch}")
                 continue
             data = _get("playlistItems", key, part="snippet,contentDetails",
-                        playlistId=playlist, maxResults=max_videos)
+                        playlistId=playlist, maxResults=min(50, max_videos * 3 + 5))  # 多抓一些，扣掉 Shorts 後還夠
         except Exception as e:  # noqa: BLE001
             print(f"[YouTube] 讀取頻道 {ch} 失敗：{e}")
             continue
-        n = 0
+        recent = []
         for v in data.get("items", []):
+            published = datetime.fromisoformat(
+                v["contentDetails"].get("videoPublishedAt", v["snippet"]["publishedAt"]).replace("Z", "+00:00"))
+            if published >= cutoff:
+                recent.append((v, published))
+        try:
+            info = _durations([v["contentDetails"]["videoId"] for v, _ in recent], key)
+        except Exception as e:  # noqa: BLE001
+            print(f"[YouTube] 讀取影片長度失敗：{e}")
+            info = {}
+        n = skipped = 0
+        for v, published in recent:
             sn = v["snippet"]
             vid = v["contentDetails"]["videoId"]
-            published = datetime.fromisoformat(
-                v["contentDetails"].get("videoPublishedAt", sn["publishedAt"]).replace("Z", "+00:00"))
-            if published < cutoff:
+            secs, live = info.get(vid, (None, "none"))
+            # 不抓 Shorts（3 分鐘以內）和還沒開始／正在直播的影片
+            if live in ("upcoming", "live") or (secs is not None and secs <= short_max) \
+                    or "#shorts" in (sn["title"] + sn.get("description", "")).lower():
+                skipped += 1
                 continue
+            if n >= max_videos:
+                break
             text = sn.get("description", "") + "\n" + _transcript(vid)
             items.append(Item(id=f"yt:{vid}", source="youtube", kind="video",
                               url=f"https://www.youtube.com/watch?v={vid}", title=sn["title"],
                               author=ch_title, published=published, text=text))
             n += 1
-        print(f"[YouTube] {ch_title}：取得 {n} 部新影片")
+        extra = f"（略過 {skipped} 部短影音／直播）" if skipped else ""
+        print(f"[YouTube] {ch_title}：取得 {n} 部新影片{extra}")
     return items
