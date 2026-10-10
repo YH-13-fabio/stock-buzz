@@ -76,7 +76,7 @@ def summarize(bars):
     lows = [b[3] for b in bars]
     closes = [b[4] for b in bars]
     vols = [b[5] for b in bars]
-    ma5, ma20, ma60 = sma(closes, 5), sma(closes, 20), sma(closes, 60)
+    ma5, ma10, ma20, ma60 = sma(closes, 5), sma(closes, 10), sma(closes, 20), sma(closes, 60)
     r = rsi(closes)
     k, d = kd(highs, lows, closes)
     dif, dea, hist = macd(closes)
@@ -122,6 +122,7 @@ def summarize(bars):
         "close": _r(c), "chg": _r(c - p), "chg_pct": _r((c - p) / p * 100),
         "volume": vols[-1],
         "ma5": _r(ma5[-1]), "ma20": _r(ma20[-1]), "ma60": _r(ma60[-1]),
+        "bias10": _r((c - ma10[-1]) / ma10[-1] * 100) if ma10[-1] else None,
         "rsi": _r(r[-1], 1), "k": _r(k[-1], 1), "d": _r(d[-1], 1),
         "dif": _r(dif[-1]), "macd": _r(dea[-1]), "hist": _r(hist[-1]),
         "notes": notes,
