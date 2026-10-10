@@ -12,6 +12,7 @@ import yaml
 
 from buzz import TZ, dcard, ptt, site, youtube
 from buzz.db import DB
+from buzz.finmind import FinMind
 from buzz.prices import PriceFetcher, target_codes
 from buzz.sentiment import SentimentAnalyzer, rule_sentiment
 from buzz.stocks import StockMatcher, load_aliases, load_stocks
@@ -67,7 +68,10 @@ def main():
 
     pr = cfg.get("prices", {})
     if pr.get("enabled", True):
-        PriceFetcher(db, pr).update(target_codes(db, 7, pr.get("max_stocks", 80)))
+        codes = target_codes(db, 7, pr.get("max_stocks", 80))
+        # 有 FinMind 就用它的官方日 K（歷史長、免費）；沒有才用永豐 1 分 K 合成
+        if not FinMind(db, pr).update(codes):
+            PriceFetcher(db, pr).update(codes)
 
     site.build(db, stocks, ROOT / "docs" / "data.json")
 
